@@ -8,6 +8,9 @@ from botocore.exceptions import NoCredentialsError, ClientError
 import boto3
 from google.cloud import storage
 import time
+from botocore.client import Config
+from google.api_core.client_options import ClientOptions
+
 
 # Load environment variables (for local dev)
 from dotenv import load_dotenv
@@ -25,14 +28,36 @@ class ReplicationRequest(BaseModel):
 
 # Configuration from environment variables
 try:
-
     GCS_TARGET_BUCKET = os.environ['GCS_TARGET_BUCKET']
-    # Boto3 will automatically use AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
-    # Google Cloud SDK will use GOOGLE_APPLICATION_CREDENTIALS
     
-    s3_client = boto3.client('s3')
-    gcs_client = storage.Client()
+    # Check for fake GCS server configuration
+    
+    # Boto3 will automatically use AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
+    s3_client = boto3.client(
+        's3', endpoint_url="http://localhost:4566",
+        aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
+        aws_secret_access_key=os.environ['AWS_SECRET_ACCESS_KEY'],
+        config=Config(signature_version='s3v4'),
+        region_name = 'us-east-1'
+    )
+
+    os.environ["STORAGE_EMULATOR_HOST"] = "http://localhost:4443"
+    gcs_client = storage.Client(project="fake-project")
+    logger.info(f"gcs_client: {gcs_client}")
+
+    # Configure Google Cloud Storage Client for fake server or real GCP
+    # if gcs_api_endpoint:
+    #     logger.info(f"Using fake GCS server at {gcs_api_endpoint}")
+    #     client_options = ClientOptions(api_endpoint=gcs_api_endpoint)
+    #     gcs_client = storage.Client(client_options=client_options)
+    # else:
+    #     logger.info("Using real GCP endpoint.")
+    #     # For real GCP, the client handles authentication via GOOGLE_APPLICATION_CREDENTIALS
+    #     gcs_client = storage.Client()
+
     gcs_bucket = gcs_client.bucket(GCS_TARGET_BUCKET)
+    logger.info(f"gcs_bucket: {gcs_bucket}")
+
 except KeyError as e:
     logger.error(f"Missing required environment variable: {e}")
     raise RuntimeError(f"Configuration error: Missing environment variable {e}")
@@ -40,11 +65,11 @@ except KeyError as e:
 # Simple retry decorator
 def retry_on_error(max_retries=3, delay_secs=2):
     def decorator(func):
-        def wrapper(*args, **kwargs):
+        def wrapper(request: ReplicationRequest):
             retries = 0
             while retries < max_retries:
                 try:
-                    return func(*args, **kwargs)
+                    return func(request)
                 except (ClientError, Exception) as e:
                     logger.warning(f"Attempt {retries + 1}/{max_retries} failed with error: {e}")
                     retries += 1
@@ -70,6 +95,7 @@ def replicate_data(request: ReplicationRequest):
 
     # Idempotency Check: Does the file already exist in GCS?
     gcs_blob = gcs_bucket.blob(gcs_key)
+    logger.info(f"gcs_blob: {gcs_blob}")
     if gcs_blob.exists():
         logger.info(f"File '{gcs_key}' already exists in GCS. Skipping replication.")
         return {"status": "skipped", "message": "File already exists in destination.", "s3_key": s3_key}
