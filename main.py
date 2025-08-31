@@ -1,15 +1,13 @@
 # main.py
 import os
-import io
 import logging
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from botocore.exceptions import NoCredentialsError, ClientError
+from botocore.exceptions import ClientError
 import boto3
 from google.cloud import storage
 import time
 from botocore.client import Config
-from google.api_core.client_options import ClientOptions
 
 
 # Load environment variables (for local dev)
@@ -41,19 +39,16 @@ try:
         region_name = 'us-east-1'
     )
 
-    os.environ["STORAGE_EMULATOR_HOST"] = "http://localhost:4443"
-    gcs_client = storage.Client(project="fake-project")
-    logger.info(f"gcs_client: {gcs_client}")
-
     # Configure Google Cloud Storage Client for fake server or real GCP
-    # if gcs_api_endpoint:
-    #     logger.info(f"Using fake GCS server at {gcs_api_endpoint}")
-    #     client_options = ClientOptions(api_endpoint=gcs_api_endpoint)
-    #     gcs_client = storage.Client(client_options=client_options)
-    # else:
-    #     logger.info("Using real GCP endpoint.")
-    #     # For real GCP, the client handles authentication via GOOGLE_APPLICATION_CREDENTIALS
-    #     gcs_client = storage.Client()
+    GCS_FAKE = os.environ.get('GCS_FAKE')
+    if GCS_FAKE:
+        os.environ["STORAGE_EMULATOR_HOST"] = "http://localhost:4443"
+        gcs_client = storage.Client(project="fake-project")
+    else:
+        # For real GCP, the client handles authentication via GOOGLE_APPLICATION_CREDENTIALS
+        gcs_client = storage.Client()
+
+    logger.info(f"gcs_client: {gcs_client}")
 
     gcs_bucket = gcs_client.bucket(GCS_TARGET_BUCKET)
     logger.info(f"gcs_bucket: {gcs_bucket}")
