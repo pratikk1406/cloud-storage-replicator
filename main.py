@@ -9,7 +9,6 @@ from google.cloud import storage
 import time
 from botocore.client import Config
 
-
 # Load environment variables (for local dev)
 from dotenv import load_dotenv
 load_dotenv()
@@ -24,13 +23,9 @@ class ReplicationRequest(BaseModel):
     s3_bucket: str
     s3_key: str
 
-# Configuration from environment variables
 try:
     GCS_TARGET_BUCKET = os.environ['GCS_TARGET_BUCKET']
-    
-    # Check for fake GCS server configuration
-    
-    # Boto3 will automatically use AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
+
     s3_client = boto3.client(
         's3', endpoint_url="http://localhost:4566",
         aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
@@ -39,13 +34,11 @@ try:
         region_name = 'us-east-1'
     )
 
-    # Configure Google Cloud Storage Client for fake server or real GCP
     GCS_FAKE = os.environ.get('GCS_FAKE')
     if GCS_FAKE:
         os.environ["STORAGE_EMULATOR_HOST"] = "http://localhost:4443"
         gcs_client = storage.Client(project="fake-project")
     else:
-        # For real GCP, the client handles authentication via GOOGLE_APPLICATION_CREDENTIALS
         gcs_client = storage.Client()
 
     logger.info(f"gcs_client: {gcs_client}")
@@ -57,7 +50,7 @@ except KeyError as e:
     logger.error(f"Missing required environment variable: {e}")
     raise RuntimeError(f"Configuration error: Missing environment variable {e}")
 
-# Simple retry decorator
+
 def retry_on_error(max_retries=3, delay_secs=2):
     def decorator(func):
         def wrapper(request: ReplicationRequest):
@@ -85,14 +78,10 @@ def replicate_data(request: ReplicationRequest):
     logger.info(f"$"*100)
     s3_bucket = request.s3_bucket
     s3_key = request.s3_key
-    gcs_key = s3_key # Using the same key for simplicity
-    logger.info(f"*"*100)
+    gcs_key = s3_key
 
-    # Idempotency Check: Does the file already exist in GCS?
     gcs_blob = gcs_bucket.blob(gcs_key)
-    logger.info(f"gcs_blob: {gcs_blob}")
     if gcs_blob.exists():
-        logger.info(f"File '{gcs_key}' already exists in GCS. Skipping replication.")
         return {"status": "skipped", "message": "File already exists in destination.", "s3_key": s3_key}
 
     logger.info(f"Initiating replication for s3://{s3_bucket}/{s3_key} to gs://{GCS_TARGET_BUCKET}/{gcs_key}")
@@ -100,9 +89,7 @@ def replicate_data(request: ReplicationRequest):
     # Use a streaming approach with a temporary in-memory buffer
     try:
         s3_object_stream = s3_client.get_object(Bucket=s3_bucket, Key=s3_key)['Body']
-        
-        # Upload the stream to GCS
-        # Note: Boto3 provides a streamable body. `gcs_blob.upload_from_file` can take a file-like object.
+
         gcs_blob.upload_from_file(s3_object_stream)
 
         logger.info(f"Successfully replicated s3://{s3_bucket}/{s3_key} to gs://{GCS_TARGET_BUCKET}/{gcs_key}")
